@@ -1,0 +1,85 @@
+
+     model{
+     
+      #priors
+      #define intercept for occupancy
+      # note that this is using the logit transformation #
+      # do you recognise it?
+      # it allows us to set the prior on the real scale #
+      # where the intercept represents the mean probability averaged 
+      # across sites and years...here we use a beta distribution 
+      # which ranges between 0 to 1, the parameters given to this prior
+      # should result in a tight, bell-shaped distribution centered around
+      # 0.5 - 
+      # if unsure you can plot different distributions to see what they look like
+      
+      #loop over years so that we get a year specific intercept
+      for( k in 1:2 ){ #two years of data
+        int.psi[ k ] <- log( mean.psi[ k ] / ( 1 - mean.psi[ k ] ) ) #define intercept
+        mean.psi[ k ] ~ dbeta( 4, 4 )  #mean occupancy probability #give prior in beta dist 0-1, conjugate prior. ~ = distributed as 
+      }
+        #We use the same process to define the prior
+        # in the detection model
+        int.p <- log( mean.p / ( 1 - mean.p ) )
+        mean.p ~ dbeta( 4, 4 )  #mean detection prob
+        
+      #priors for fixed coefficients in ecological model:
+      for( b in 1:B ){ #loop over number of predictors
+      
+        beta.psi[ b ] ~ dnorm( 0, 0.05 ) #variance - std
+      
+        #this precision is not fully uninformative but actually 
+        #regularizes the estimates around 0 to help computation
+      }
+      
+      #priors for fixed coefficients in detection submodel:
+        alpha.p ~ dnorm( 0, 0.05 ) 
+
+      #Define the ecological model for occupancy:
+      for( i in 1:I ){  #loop over I number of sites
+            
+            #true occupancy state, z, is given a bernoulli distribution
+            # with probability psi:
+            z[ i ] ~ dbern( psi[ i ] ) 
+            
+            #probability of occupancy, psi is linked to predictors
+            # using a logit function:
+            logit( psi[ i ] ) <- int.psi[ yearid[i] ] + #year effect
+                  beta.psi[ 1 ] * X[ i, 1 ] + #shrub
+                  beta.psi[ 2 ] * X[ i, 2 ] #aplomado habitat
+                  
+        } #I sites
+        
+      #Define the observation model: 
+      for( i in 1:I ){  #loop over sites
+        for( j in 1:J ){ #loop over surveys each year
+          
+            # Link probability of detection, p, to predictors 
+            # using a logit function
+            logit( p[ i, j ] ) <- int.p +
+                #fixed predictors
+                alpha.p * wind_sc[ i, j ]  # wind
+            
+        #Here we link our observations to the estimated, true occupancy, z,
+        # from our ecological model above
+      
+        y_obs[ i,j ] ~ dbern( z[ i ] * p[ i, j ] ) #obvs linked to probability as bernoulli
+
+        #Estimate what the model would have produced as observations
+        # we do this for model evaluation later
+        yhat[ i,j ] ~ dbern( z[ i ] * p[ i, j ] )
+        
+        #Estimate the likelihood of observed and predicted
+        # values for model validation later
+        lik_yobs[ i,j ] <- ( ( psi[ i ] * p[ i,j ] )^y_obs[ i,j ] ) *
+              ( ( 1 - psi[ i ] * p[ i,j ] )^( 1 - y_obs[ i,j ] ) )
+        
+        #likelihood of estimated detections:
+        lik_yhat[ i,j ] <- ( ( psi[ i ]* p[ i,j ] )^yhat[ i,j ] ) *
+            ( ( 1 - psi[ i ] * p[ i,j ] )^( 1 - yhat[ i,j ] ) )
+
+      }}#
+        
+     } #model close
+     
+     
