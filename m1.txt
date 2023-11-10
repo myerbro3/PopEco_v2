@@ -2,82 +2,95 @@
      model{
      
       #priors
-      #for detection model: 
       #define intercept as mean probs:
       int.det <- log( mean.det / ( 1 - mean.det ) )
       mean.det ~ dbeta( 4, 4 )
       
-      #random intercept for observer
-      for( s in 1:S ){
-        eps.det[s] ~ dnorm( 0, pres.det ) T(-7, 7)
-      }
-      #associated variance of random intercepts:     
-      pres.det <- 1/ ( sigma.det * sigma.det )
-      #sigma prior specified as a student t half-normal:
-      sigma.det ~ dt( 0, 2.5, 7 ) T( 0, )
-      
       #priors for detection coefficients:
-      #define as a slightly informative prior
-      for( a in 1:A){
-        alpha[ a ] ~ dnorm( 0, 0.2 ) T(-7, 7 )
-      }
-      #priors for abundance coefficients:
-      for( b in 1:B ){
+      for( a in 1:A ){
         #define as a slightly informative prior
-        beta[ b ] ~ dnorm( 0, 0.2 ) T(-7, 7 )
+        alpha[a] ~ dnorm( 0, 0.2 ) T(-7, 7 ) 
       }
       
-      #prior for abundance model intercept 
-      int.lam ~ dgamma( 0.01, 0.01 ) T(-10, 10 )
+      #define intercept for abundance just with normal
+      int.lam ~ dnorm( 0, 0.01 )
+
+      #priors for abundance coefficients:
+      #for( b in 1:B ){
+        #define as a slightly informative prior
+      beta ~ dnorm( 0, 0.2 ) T(-7, 7 )
+      # }
       
-    
-    # ecological model of abundance
-    for( i in 1:I ){
-      #relative abundance modelled as a Poisson distribution 
-      N[ i ] ~ dpois( lambda[ i ] )
+    # Convert to Poisson/lognormal to account for overdispersion 
+      # between sites by adding a random intercept for site
+      # #random intercept for site #did not converge 
+      prec.i <- 1 / ( sigma.i * sigma.i )
+      sigma.i ~ dt( 0, 2.5, 7 ) T(0, )
       
-      #linking abundance rate to predictor
-      log( lambda[ i ] ) <- #intercept for abundance 
-                          int.lam + 
-                 # fixed effects of sagebrush and cheatgrass
-                        inprod( beta, XI[ i, ]  )
-    }
-      #observation model
-     for( i in 1:I ){  
-      for( j in 1:J ){
-        #model for probability of detection
-        logit( p[i,j] ) <- #intercept for detection 
-                          int.det + 
-                  #random intercept for observer effect
-                  eps.det[ obvs[i,j] ] +
-                  #quadratic effect of time of day
-                  alpha[1] * time[i,j] +
-                  alpha[2] * time2[i,j]
-                  
-        #observed counts distributed as a Binomial:
-        y_obs[ i, j ] ~ dbin( p[i,j], N[i] )  
-                  
-        #Model evaluation: We calculate Chi-squared discrepancy
+    #random site intercept
+    # makes the model a Poisson/log Normal accommodating 
+    # for overdispersion
+      for ( i in 1:S ){  #loop over sites
+        eps.i[ i ] ~ dnorm( 0, prec.i )
+      } #S
+
+    # log-linear ecological model of abundance
+    for( i in 1:I ){ #sitesXyear combo
+
+      #log-linear model for abundance model 
+      log( lambda[ i ] ) <- int.lam + 
+                        eps.i[ site[i] ] + #random site effect
+                        #we matrix multiply for all habitat predictors:
+                        inprod( beta, XIK[ i ])
         
-        #start with expected abundance
-        eval[i,j] <- p[i,j] * N[i]
-        #compare vs observed counts
-        E[i,j] <- pow( ( y_obs[i,j] - eval[i,j] ), 2 ) /
-                  ( eval[i,j] + 0.001 )
-        # Generate replicate data and compute fit stats
-        #expected counts
-        y_hat[ i, j ] ~ dbin( p[i,j], N[i] )
-        #compare vs expected counts
-        E.new[i,j] <- pow( ( y_hat[i,j] - eval[i,j] ), 2 ) /
-                  ( eval[i,j] + 0.001 )
+          #poisson parameter = multinomial cell probabilities of 
+          # expected abundance for each survey day
+          pi[i,1] <- (1-p[i,1]) * (1 - p[i,2]) * p[i,3] * lambda[ i ] #001
+          pi[i,2] <- (1-p[i,1]) * p[i,2]  * (1-p[i,3]) * lambda[ i ]#010
+          pi[i,3] <- (1-p[i,1]) * p[i,2] * p[i,3] * lambda[ i ] #011
+          pi[i,4] <- p[i,1] * (1-p[i,2]) * (1-p[i,3]) * lambda[ i ] #100
+          pi[i,5] <- p[i,1] * (1-p[i,2]) * p[i,3] * lambda[ i ] #101
+          pi[i,6] <-  p[i,1] * p[i,2] * (1-p[i,3]) * lambda[ i ] #110
+          pi[i,7] <- p[i,1] * p[i,2] *p[i,3] * lambda[ i ] #111
       
-    } #close J
-    } #close I
+      #loop over each column      
+      for( c in 1:CH ){
+      
+        #relate counts of capture histories to detectionXlambda
+        y[ i, c ] ~ dpois( pi[i,c] )
         
-    #derived estimates of model fit
-    fit <- sum( E[,] )
-    fit.new <- sum( E.new[,] )
-    
-    } #model close
+        #predict capture histories
+        y_hat[ i, c ] ~ dpois( pi[i,c] )
+        #calculate model residuals
+        e1[ i,c ] <- pi[ i,c ] * N[i]
+        resid1[i,c] <- pow( pow( y[ i, c ], 0.5 ) - 
+                          pow( e1[i,c], 0.5), 2 )
+        resid1_hat[i,c] <- pow( pow( y_hat[ i, c ], 0.5 ) - 
+                          pow( e1[i,c], 0.5), 2 )
+        
+       }
+        
+      for( j in 1:J ){ #loop over survey days
+      
+        logit( p[ i, j ] ) <- int.det +
+                  #fixed effects
+                  alpha[1] * wind[ i, j ] +
+                  alpha[2] * temp[ i, j ] +
+                  alpha[3] * effort[ i, j ]
+        
+      } #close J
+      
+      #generate predictions of N[i]
+      N[ i ] ~ dpois( lambda[i] )
+      
+      }#close i
+
+      #fit statistic for observed data y, 
+      #think of it as fit of encounter model
+      #how well does the model for y|n fit?
+      fit1 <- sum( resid1[,] )
+      fit1_hat <- sum( resid1_hat[,] )
+
+     } #model close
      
      

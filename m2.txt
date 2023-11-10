@@ -1,0 +1,118 @@
+
+     model{
+     
+      #priors
+      #for detection model: 
+      #define intercept as mean probs:
+      int.det <- log( mean.det / ( 1 - mean.det ) )
+      mean.det ~ dbeta( 4, 4 )
+      
+      #priors for detection coefficients:
+      for( a in 1:A ){
+        #define as a slightly informative prior
+        alpha[a] ~ dnorm( 0, 0.2 ) T(-7, 7 )
+      }
+      
+      #define intercept for abundance just with normal
+      int.lam ~ dnorm( 0, 0.01 )
+
+      #priors for abundance coefficients:
+      #for( b in 1:B ){
+        #define as a slightly informative prior
+        beta ~ dnorm( 0, 0.2 ) T(-7, 7 )
+      # }
+      
+    # Convert to Poisson/lognormal to account for overdispersion 
+      # between sites by adding a random intercept for site
+      # #random intercept for site #did not converge 
+      prec.i <- 1 / ( sigma.i * sigma.i )
+      sigma.i ~ dt( 0, 2.5, 7 ) T(0, )
+      
+    #random site intercept
+    # makes the model a Poisson/log Normal accommodating 
+    # for overdispersion
+      for ( i in 1:S ){  #loop over sites
+        eps.i[ i ] ~ dnorm(0, prec.i )
+      } #M
+
+
+    # log-linear ecological model of abundance
+    for( i in 1:I ){#sitesXyear combo
+
+      #log-linear model for abundance model 
+      log( lambda[ i ] ) <- int.lam + 
+                        eps.i[ site[i] ] + #random site effect
+                        #effect of herbaceous cover
+                        inprod( beta, XIK[ i ] )
+        
+          #poisson parameter = multinomial cell probabilities of 
+          # expected abundance for each survey day
+          pi[i,1] <- (1-p[i,1]) * (1 - p[i,2]) * p[i,3] #001 # NO LAMBDA AT END LIKE M1
+          pi[i,2] <- (1-p[i,1]) * p[i,2]  * (1-p[i,3]) #010
+          pi[i,3] <- (1-p[i,1]) * p[i,2] * p[i,3]  #011
+          pi[i,4] <- p[i,1] * (1-p[i,2]) * (1-p[i,3])#100
+          pi[i,5] <- p[i,1] * (1-p[i,2]) * p[i,3]  #101
+          pi[i,6] <-  p[i,1] * p[i,2] * (1-p[i,3])  #110
+          pi[i,7] <- p[i,1] * p[i,2] *p[i,3] #111
+        #probability of 000 capture history
+        pi0[i] <- 1 - (pi[i,1] + pi[i,2] +pi[i,3] +pi[i,4] +pi[i,5]+
+                    pi[i,6] + pi[i,7] )
+        pcap[i] <- 1 - pi0[i]
+          
+      #loop over each column      
+      for( c in 1:CH ){
+        pic[ i, c ] <- pi[ i, c ] / pcap[ i ]
+        
+        #estimated y based on encounter model
+        e1[i,c] <- pic[ i, c ] * n[i]
+        resid1[i,c] <- pow( pow( y[ i, c ], 0.5 ) - pow( e1[i,c], 0.5), 2 )
+        resid1_hat[i,c] <- pow( pow( y_hat[ i, c ], 0.5 ) - 
+                          pow( e1[i,c], 0.5), 2 )
+       }
+        
+      #observations based on conditional cell probabilities  
+      y[ i, 1:CH ] ~ dmulti( pic[ i, 1:CH ], n[ i ] )  
+      #estimated capture histories
+      y_hat[ i, 1:CH ] ~ dmulti( pic[ i, 1:CH ], n[ i ] )  
+      
+      #model for observed sample size
+      n[ i ] ~ dbin( pcap[ i ], N[ i ] )
+      #estimated number of indiv. observed
+      n_hat[ i ] ~ dbin( pcap[ i ], N[ i ] )
+      
+      #expected n based on model
+      e2[ i ] <- pcap[ i ] * lambda[ i ]
+      resid2[ i ] <-  pow( pow( n[ i ], 0.5 ) - pow( e2[ i ], 0.5), 2 )
+      resid2_hat[ i ] <- pow( pow( n_hat[ i ], 0.5 ) - pow( e2[ i ], 0.5), 2 )
+      
+      #process model
+      N[ i ] ~ dpois( lambda[i] )
+
+      for( j in 1:J ){ #loop over survey days
+      
+        logit( p[ i, j ] ) <- int.det +
+                  #fixed effects
+                  alpha[1] * wind[ i, j ] +
+                  alpha[2] * temp[ i, j ] +
+                  alpha[3] * effort[ i, j ]
+        
+      } #close J
+      
+      }#close n
+    
+    #Bayesian pvalue based on freeman-tukey statistic where 
+    # FIT = sum( y^0.5 - e^0.5)^2 
+    
+    #fit statistic for observed data y, think of it as fit of encounter model
+    #how well does the model for y|n fit?
+    fit1 <- sum( resid1[,] )
+    fit1_hat <- sum( resid1_hat[,] )
+    
+    #fit of model for n. Think of it as a test for the abundance part of the model #
+    #since having variation in N shows up in the expected value of n.
+    fit2 <- sum( resid2[] )
+    fit2_hat <- sum( resid2_hat[] )
+    
+     } #model close
+     
+     
